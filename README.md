@@ -58,3 +58,16 @@ docker run --rm -p 8019:8000 --env-file .env todo-board
 - Parsing is regex-based on the table format above; it is not a general Markdown parser.
 - No concurrency control. Edits rewrite the whole post, so simultaneous edits are last-write-wins.
 - Designed for a handful of cards and a few dozen rows; no pagination.
+
+---
+
+## 日本語
+
+MattermostのTODOチャンネルをブラウザから編集する小さな盤面。Mattermostが正本で、このアプリは
+親投稿の表を読み書きするだけ（独自DBなし）。ターミナルを使わない人でもTODOの追加・状況変更ができる。
+
+- できること：カード一覧（`GET /api/board`）、状況変更、行追加、状態行の書き換え、新規カード作成
+- トークンはサーバ側だけ。`BOARD_USER` / `BOARD_PASS` でBasic認証を掛けられる
+- 前提の書式：`## 案件名` → `状態:` → `更新:` → `| # | TODO | 状況 | 期限 |` の表
+- 親投稿への返信は履歴として扱い、パースしない
+- 割り切り：表は正規表現でパース（汎用Markdownではない）、同時編集は後勝ち、ページングなし
