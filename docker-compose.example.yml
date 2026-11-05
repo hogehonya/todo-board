@@ -1,0 +1,21 @@
+services:
+  board:
+    build: .
+    container_name: todo-board
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Asia/Tokyo
+    restart: unless-stopped
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.todo-board.rule=Host(`todo-board.example.com`)"
+      - "traefik.http.routers.todo-board.entrypoints=websecure"
+      - "traefik.http.services.todo-board.loadbalancer.server.port=8000"
+
+networks:
+  proxy:
+    external: true

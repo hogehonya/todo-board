@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO盤面</title>
+<style>
+  :root { --fg:#111; --muted:#666; --line:#d8dbe0; --bg:#fafbfc; --accent:#2b6cb0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"IBM Plex Sans JP",system-ui,sans-serif; color:var(--fg); background:var(--bg); }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); background:#fff; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; letter-spacing:.04em; }
+  .sub { color:var(--muted); font-size:12px; }
+  main { padding:20px; display:grid; gap:16px; max-width:1100px; margin:0 auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card h2 { font-size:15px; margin:0 0 6px; }
+  .meta { font-size:12px; color:var(--muted); margin-bottom:10px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; color:var(--muted); font-size:12px; }
+  tr.done td { color:var(--muted); text-decoration:line-through; }
+  select, input, button { font:inherit; }
+  select { padding:2px 4px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  .status-未着手 { color:#8a6d3b; }
+  .status-進行中 { color:#2b6cb0; }
+  .status-待ち   { color:#b7791f; }
+  .status-完了   { color:#2f855a; }
+  .add { display:flex; gap:6px; margin-top:10px; }
+  .add input[type=text] { flex:1; padding:4px 6px; border:1px solid var(--line); border-radius:6px; }
+  .add input[type=text].due { flex:0 0 90px; }
+  button { padding:4px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  .links { margin-top:8px; font-size:12px; display:flex; gap:12px; flex-wrap:wrap; }
+  .links a { color:var(--accent); text-decoration:none; }
+  .new { display:flex; gap:6px; flex-wrap:wrap; }
+  .new input { padding:5px 8px; border:1px solid var(--line); border-radius:6px; }
+  .new input[name=title] { flex:1 1 240px; }
+  .new input[name=todos] { flex:3 1 320px; }
+  .empty { color:var(--muted); font-size:13px; }
+  .err { color:#c53030; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TODO盤面</h1>
+  <span class="sub" id="sub">読み込み中…</span>
+  <span class="err" id="err"></span>
+</header>
+<main>
+  <section class="card">
+    <h2>新しい案件</h2>
+    <div class="new">
+      <input name="title" placeholder="案件名（例: サラダボウル ICT・DX 応募）">
+      <input name="todos" placeholder="TODOをカンマ区切り（例: 写真撮影, 応募送信）">
+      <button id="create">追加</button>
+    </div>
+  </section>
+  <div id="cards"></div>
+</main>
+<script>
+const STATUSES = ["未着手", "進行中", "待ち", "完了"];
+const err = (m) => { document.getElementById("err").textContent = m || ""; };
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    err(`${res.status}: ${t.slice(0, 200)}`);
+    throw new Error(t);
+  }
+  return res.json();
+}
+
+function rowEl(card, row) {
+  const tr = document.createElement("tr");
+  tr.className = row.status === "完了" ? "done" : "";
+  tr.innerHTML = `<td>${row.n}</td><td>${esc(row.todo)}</td><td></td><td>${esc(row.due)}</td>`;
+  const sel = document.createElement("select");
+  for (const s of STATUSES) {
+    const o = document.createElement("option");
+    o.value = o.textContent = s;
+    if (s === row.status) o.selected = true;
+    sel.append(o);
+  }
+  sel.className = `status-${row.status}`;
+  sel.onchange = async () => {
+    sel.className = `status-${sel.value}`;
+    await api("/api/status", { post_id: card.post_id, n: row.n, status: sel.value });
+    load();
+  };
+  tr.children[2].append(sel);
+  return tr;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function cardEl(card) {
+  const el = document.createElement("section");
+  el.className = "card";
+  el.innerHTML = `<h2>${esc(card.title)}</h2>
+    <div class="meta"><span>状態: ${esc(card.state || "—")}</span><span>更新: ${esc(card.updated || "—")}</span></div>
+    <table><thead><tr><th>#</th><th>TODO</th><th>状況</th><th>期限</th></tr></thead><tbody></tbody></table>
+    <div class="add">
+      <input type="text" placeholder="TODOを追加">
+      <input type="text" class="due" placeholder="期限">
+      <button>追加</button>
+    </div>
+    <div class="links"></div>`;
+  const tbody = el.querySelector("tbody");
+  card.rows.forEach((r) => tbody.append(rowEl(card, r)));
+
+  const [todoIn, dueIn] = el.querySelectorAll(".add input");
+  el.querySelector(".add button").onclick = async () => {
+    if (!todoIn.value.trim()) return;
+    await api("/api/row", { post_id: card.post_id, todo: todoIn.value.trim(), due: dueIn.value.trim() || "—" });
+    load();
+  };
+
+  const stateEl = el.querySelector(".meta span");
+  stateEl.style.cursor = "pointer";
+  stateEl.title = "クリックで状態を編集";
+  stateEl.onclick = async () => {
+    const v = prompt("状態（例: 進行中（次: 応募フォーム送信））", card.state);
+    if (v === null) return;
+    await api("/api/state", { post_id: card.post_id, state: v });
+    load();
+  };
+
+  const links = el.querySelector(".links");
+  (card.links || []).forEach(([name, url]) => {
+    const a = document.createElement("a");
+    a.href = url; a.textContent = name; a.target = "_blank"; a.rel = "noopener";
+    links.append(a);
+  });
+  return el;
+}
+
+async function load() {
+  err("");
+  const data = await api("/api/board");
+  document.getElementById("sub").textContent = `#${data.channel} / ${data.cards.length}件`;
+  const host = document.getElementById("cards");
+  host.innerHTML = "";
+  if (!data.cards.length) {
+    host.innerHTML = `<section class="card empty">TODOはまだありません</section>`;
+    return;
+  }
+  data.cards.forEach((c) => host.append(cardEl(c)));
+}
+
+document.getElementById("create").onclick = async () => {
+  const title = document.querySelector("input[name=title]").value.trim();
+  const todos = document.querySelector("input[name=todos]").value.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!title) return;
+  await api("/api/card", { title, state: "未着手", todos });
+  document.querySelector("input[name=title]").value = "";
+  document.querySelector("input[name=todos]").value = "";
+  load();
+};
+
+load();
+</script>
+</body>
+</html>
